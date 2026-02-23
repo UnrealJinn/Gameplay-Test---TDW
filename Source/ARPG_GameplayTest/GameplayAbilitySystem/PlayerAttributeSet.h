@@ -1,8 +1,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "AbilitySystemComponent.h"
 #include "AttributeSet.h"
+#include "AbilitySystemComponent.h"
 #include "PlayerAttributeSet.generated.h"
 
 #define ATTRIBUTE_ACCESSORS_BASIC(ClassName, PropertyName) \
@@ -17,8 +17,9 @@ class ARPG_GAMEPLAYTEST_API UPlayerAttributeSet : public UAttributeSet
 	GENERATED_BODY()
 
 public:
-
 	UPlayerAttributeSet();
+
+	virtual void GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const override;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Attributes")
 	FGameplayAttributeData Health;
@@ -39,6 +40,4 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Attributes")
 	FGameplayAttributeData AttackSpeed;
 	ATTRIBUTE_ACCESSORS_BASIC(UPlayerAttributeSet, AttackSpeed)
-	
-	virtual void GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const override;
 };

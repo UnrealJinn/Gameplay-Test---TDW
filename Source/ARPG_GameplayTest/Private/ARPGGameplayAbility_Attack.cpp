@@ -1,285 +1,189 @@
-
 #include "ARPGGameplayAbility_Attack.h"
 
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "GameplayEffect.h"
-#include "GameplayTagContainer.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetSystemLibrary.h"
-#include "GameFramework/CharacterMovementComponent.h"
-#include "GameFramework/Character.h"
 #include "ARPGCharacter.h"
 #include "DrawDebugHelpers.h"
 
 UARPGGameplayAbility_Attack::UARPGGameplayAbility_Attack()
 {
-    InstancingPolicy   = EGameplayAbilityInstancingPolicy::InstancedPerExecution;
-    NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::LocalPredicted;
-    NetSecurityPolicy  = EGameplayAbilityNetSecurityPolicy::ClientOrServer;
+	InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerExecution;
+	NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::LocalOnly;
 }
-void UARPGGameplayAbility_Attack::ActivateAbility(
-    const FGameplayAbilitySpecHandle Handle,
-    const FGameplayAbilityActorInfo* ActorInfo,
-    const FGameplayAbilityActivationInfo ActivationInfo,
-    const FGameplayEventData* TriggerEventData)
+
+void UARPGGameplayAbility_Attack::ActivateAbility(const FGameplayAbilitySpecHandle Handle,const FGameplayAbilityActorInfo* ActorInfo,const FGameplayAbilityActivationInfo ActivationInfo,const FGameplayEventData* TriggerEventData)
 {
-    Super::ActivateAbility(Handle, ActorInfo, ActivationInfo, TriggerEventData);
+	Super::ActivateAbility(Handle, ActorInfo, ActivationInfo, TriggerEventData);
 
-    CachedHandle         = Handle;
-    CachedActorInfo      = ActorInfo;
-    CachedActivationInfo = ActivationInfo;
+	CachedHandle         = Handle;
+	CachedActorInfo      = ActorInfo;
+	CachedActivationInfo = ActivationInfo;
 
-    UE_LOG(LogTemp, Warning, TEXT("[Attack] ====== ActivateAbility ======"));
-    if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Yellow,
-        TEXT("[Attack] ====== ActivateAbility ======"));
+	if (!CommitAbility(Handle, ActorInfo, ActivationInfo))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Attack] not enough mana"));
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
+		return;
+	}
 
-    if (!CommitAbility(Handle, ActorInfo, ActivationInfo))
-    {
-        UE_LOG(LogTemp, Error, TEXT("[Attack] CommitAbility FAILED"));
-        if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Red,
-            TEXT("[Attack] CommitAbility FAILED"));
-        EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
-        return;
-    }
+	AActor* AvatarActor = ActorInfo->AvatarActor.Get();
+	ACharacter* Character = Cast<ACharacter>(AvatarActor);
+	if (!Character)
+	{
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		return;
+	}
 
-    AActor* AvatarActor = ActorInfo->AvatarActor.Get();
-    ACharacter* Character = Cast<ACharacter>(AvatarActor);
-    if (!Character)
-    {
-        UE_LOG(LogTemp, Error, TEXT("[Attack] Avatar is not ACharacter"));
-        EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
-        return;
-    }
+	ActorsToIgnore.Empty();
+	ActorsToIgnore.AddUnique(AvatarActor);
 
-    ActorsToIgnore.Empty();
-    ActorsToIgnore.AddUnique(AvatarActor);
+	// figure out where to jump
+	TargetActor = nullptr;
+	TargetLoc_Cursor = FVector::ZeroVector;
 
-    TargetActor = nullptr;
-    TargetLoc_Cursor = FVector::ZeroVector;
+	if (APlayerController* PC = Cast<APlayerController>(Character->GetController()))
+	{
+		FHitResult Hit;
+		PC->GetHitResultUnderCursorByChannel(UEngineTypes::ConvertToTraceType(ECC_Visibility), true, Hit);
 
-    APlayerController* PC = Cast<APlayerController>(Character->GetController());
-    if (PC)
-    {
-        FHitResult Hit;
-        PC->GetHitResultUnderCursorByChannel(
-            UEngineTypes::ConvertToTraceType(ECC_Visibility),
-            true,
-            Hit
-        );
+		if (Hit.bBlockingHit && IsValid(Hit.GetActor()) &&
+			Hit.GetActor() != AvatarActor &&
+			UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Hit.GetActor()))
+		{
+			// clicked an enemy
+			TargetActor = Hit.GetActor();
+		}
+		else if (Hit.bBlockingHit)
+		{
+			// clicked ground, move to that position
+			TargetLoc_Cursor = Hit.Location;
+		}
+	}
 
-        UE_LOG(LogTemp, Error, TEXT("[Attack] Hit.bBlockingHit: %s | Hit.Actor: %s | Hit.Location: %s"),
-            Hit.bBlockingHit ? TEXT("YES") : TEXT("NO"),
-            Hit.GetActor() ? *Hit.GetActor()->GetName() : TEXT("NULL"),
-            *Hit.Location.ToString());
+	const FVector StartLoc = AvatarActor->GetActorLocation();
+	const FVector TargetLoc = TargetActor
+		? TargetActor->GetActorLocation()
+		: (!TargetLoc_Cursor.IsZero() ? TargetLoc_Cursor : StartLoc + AvatarActor->GetActorForwardVector() * 500.f);
 
-        if (Hit.bBlockingHit && IsValid(Hit.GetActor()) &&
-            Hit.GetActor() != AvatarActor &&
-            UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Hit.GetActor()) != nullptr)
-        {
-            TargetActor = Hit.GetActor();
-            UE_LOG(LogTemp, Warning, TEXT("[Attack] Target actor: %s"), *TargetActor->GetName());
-            if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Green,
-                FString::Printf(TEXT("[Attack] Target: %s"), *TargetActor->GetName()));
-        }
-        else if (Hit.bBlockingHit)
-        {
-            TargetLoc_Cursor = Hit.Location;
-            UE_LOG(LogTemp, Warning, TEXT("[Attack] Moving to cursor pos: %s"), *Hit.Location.ToString());
-            if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Orange,
-                TEXT("[Attack] Moving to cursor position"));
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("[Attack] No cursor hit, jumping forward"));
-            if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Orange,
-                TEXT("[Attack] No cursor hit"));
-        }
-    }
+	// flatten direction, add Z separately so arc feels consistent
+	FVector LaunchDir = (TargetLoc - StartLoc);
+	LaunchDir.Z = 0.f;
+	LaunchDir = LaunchDir.GetSafeNormal();
 
-    const FVector StartLoc = AvatarActor->GetActorLocation();
-    const FVector TargetLoc = TargetActor
-        ? TargetActor->GetActorLocation()
-        : (!TargetLoc_Cursor.IsZero()
-            ? TargetLoc_Cursor
-            : StartLoc + AvatarActor->GetActorForwardVector() * 500.f);
+	FVector LaunchVelocity = LaunchDir * LaunchSpeed;
+	LaunchVelocity.Z = LaunchZForce;
 
-    FVector LaunchDir = (TargetLoc - StartLoc);
-    LaunchDir.Z = 0.f;
-    LaunchDir = LaunchDir.GetSafeNormal();
+	// face target before jumping
+	FRotator LookAt = UKismetMathLibrary::FindLookAtRotation(StartLoc, TargetLoc);
+	LookAt.Pitch = LookAt.Roll = 0.f;
+	Character->SetActorRotation(LookAt);
 
-    FVector LaunchVelocity = LaunchDir * LaunchSpeed;
-    LaunchVelocity.Z = LaunchZForce;
+	Character->LaunchCharacter(LaunchVelocity, true, true);
 
-    const float Distance = FVector::Distance(StartLoc, TargetLoc);
+	// debug
+	DrawDebugLine(GetWorld(), StartLoc, TargetLoc, FColor::Yellow, false, 3.f, 0, 3.f);
+	DrawDebugSphere(GetWorld(), StartLoc, 40.f, 12, FColor::Green, false, 3.f);
+	DrawDebugSphere(GetWorld(), TargetLoc, 40.f, 12, FColor::Red, false, 3.f);
 
-    UE_LOG(LogTemp, Warning, TEXT("[Attack] Distance: %.1f | LaunchVel: %s"),
-        Distance, *LaunchVelocity.ToString());
-    if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Cyan,
-        FString::Printf(TEXT("[Attack] Dist: %.1f | Launch: %s"),
-            Distance, *LaunchVelocity.ToString()));
+	// apply damage after delay
+	GetWorld()->GetTimerManager().SetTimer(DamageTimerHandle, [this]()
+	{
+		if (!CachedActorInfo) return;
 
-    DrawDebugLine(GetWorld(), StartLoc, TargetLoc, FColor::Yellow, false, 3.f, 0, 3.f);
-    DrawDebugSphere(GetWorld(), StartLoc,  40.f, 12, FColor::Green, false, 3.f);
-    DrawDebugSphere(GetWorld(), TargetLoc, 40.f, 12, FColor::Red,   false, 3.f);
+		AActor* Avatar = CachedActorInfo->AvatarActor.Get();
+		if (!Avatar) return;
 
-    FRotator LookAt = UKismetMathLibrary::FindLookAtRotation(StartLoc, TargetLoc);
-    LookAt.Pitch = 0.f;
-    LookAt.Roll  = 0.f;
-    Character->SetActorRotation(LookAt);
+		if (UAbilitySystemComponent* ASC = CachedActorInfo->AbilitySystemComponent.Get())
+		{
+			FGameplayCueParameters CueParams;
+			CueParams.Instigator = CueParams.EffectCauser = Avatar;
+			ASC->ExecuteGameplayCue(GameplayCueTag, CueParams);
+		}
 
-    Character->LaunchCharacter(LaunchVelocity, true, true);
+		PerformAttackOverlap();
 
-    UE_LOG(LogTemp, Warning, TEXT("[Attack] LaunchCharacter called"));
-    if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Green,
-        TEXT("[Attack] LaunchCharacter called"));
+	}, DamageDelay, false);
 
-    FTimerDelegate DamageDelegate;
-    DamageDelegate.BindLambda([this]()
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[Attack] Damage timer fired"));
-        if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Red,
-            TEXT("[Attack] Damage timer fired"));
+	// end ability shortly after damage
+	GetWorld()->GetTimerManager().SetTimer(EndTimerHandle, [this]()
+	{
+		RestoreMovement();
+		CommitAbilityCooldown(CachedHandle, CachedActorInfo, CachedActivationInfo, true);
+		EndAbility(CachedHandle, CachedActorInfo, CachedActivationInfo, true, false);
 
-        if (!CachedActorInfo) return;
-
-        AActor* Avatar = CachedActorInfo->AvatarActor.Get();
-        if (!Avatar) return;
-
-        if (UAbilitySystemComponent* ASC = CachedActorInfo->AbilitySystemComponent.Get())
-        {
-            FGameplayCueParameters CueParams;
-            CueParams.Instigator   = Avatar;
-            CueParams.EffectCauser = Avatar;
-            ASC->ExecuteGameplayCue(GameplayCueTag, CueParams);
-        }
-
-        PerformAttackOverlap();
-    });
-
-    GetWorld()->GetTimerManager().SetTimer(
-        DamageTimerHandle, DamageDelegate, DamageDelay, false);
-
-    FTimerDelegate EndDelegate;
-    EndDelegate.BindLambda([this]()
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[Attack] End timer fired"));
-        if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Purple,
-            TEXT("[Attack] End timer fired"));
-
-        RestoreMovement();
-        CommitAbilityCooldown(CachedHandle, CachedActorInfo, CachedActivationInfo, true);
-        EndAbility(CachedHandle, CachedActorInfo, CachedActivationInfo, true, false);
-    });
-
-    GetWorld()->GetTimerManager().SetTimer(
-        EndTimerHandle, EndDelegate, DamageDelay + 0.3f, false);
+	}, DamageDelay + 0.3f, false);
 }
 
 void UARPGGameplayAbility_Attack::PerformAttackOverlap()
 {
-    AActor* AvatarActor = CachedActorInfo ? CachedActorInfo->AvatarActor.Get() : nullptr;
-    if (!AvatarActor) return;
+	AActor* AvatarActor = CachedActorInfo ? CachedActorInfo->AvatarActor.Get() : nullptr;
+	if (!AvatarActor) return;
 
-    UAbilitySystemComponent* SourceASC = CachedActorInfo->AbilitySystemComponent.Get();
-    if (!SourceASC || !DamageEffectClass)
-    {
-        UE_LOG(LogTemp, Error, TEXT("[Attack] SourceASC or DamageEffectClass NULL"));
-        return;
-    }
+	UAbilitySystemComponent* SourceASC = CachedActorInfo->AbilitySystemComponent.Get();
+	if (!SourceASC || !DamageEffectClass) return;
 
-    TArray<AActor*> OverlappedActors;
-    TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
-    ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_Pawn));
+	TArray<AActor*> OverlappedActors;
+	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
+	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_Pawn));
 
-    UKismetSystemLibrary::SphereOverlapActors(
-        AvatarActor,
-        AvatarActor->GetActorLocation(),
-        AttackRadius,
-        ObjectTypes,
-        AARPGCharacter::StaticClass(),
-        ActorsToIgnore,
-        OverlappedActors
-    );
+	UKismetSystemLibrary::SphereOverlapActors(AvatarActor,AvatarActor->GetActorLocation(),AttackRadius,ObjectTypes,AARPGCharacter::StaticClass(),ActorsToIgnore,OverlappedActors);
 
-    const FColor SphereColor = OverlappedActors.Num() > 0 ? FColor::Red : FColor::Blue;
-    DrawDebugSphere(GetWorld(), AvatarActor->GetActorLocation(),
-        AttackRadius, 24, SphereColor, false, 3.f, 0, 2.f);
+	DrawDebugSphere(GetWorld(), AvatarActor->GetActorLocation(),AttackRadius, 24, OverlappedActors.Num() > 0 ? FColor::Red : FColor::Blue, false, 3.f, 0, 2.f);
 
-    UE_LOG(LogTemp, Warning, TEXT("[Attack] Overlap hit %d actors"), OverlappedActors.Num());
-    if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.f, SphereColor,
-        FString::Printf(TEXT("[Attack] Hit %d actors"), OverlappedActors.Num()));
+	for (AActor* HitActor : OverlappedActors)
+	{
+		if (!IsValid(HitActor)) continue;
 
-    for (AActor* HitActor : OverlappedActors)
-    {
-        if (!IsValid(HitActor)) continue;
+		UAbilitySystemComponent* TargetASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(HitActor);
+		if (!TargetASC) continue;
 
-        UAbilitySystemComponent* TargetASC =
-            UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(HitActor);
-        if (!TargetASC) continue;
+		FGameplayEffectContextHandle Ctx = SourceASC->MakeEffectContext();
+		Ctx.AddInstigator(AvatarActor, AvatarActor);
 
-        FGameplayEffectContextHandle CtxHandle = SourceASC->MakeEffectContext();
-        CtxHandle.AddInstigator(AvatarActor, AvatarActor);
+		FGameplayEffectSpecHandle Spec = SourceASC->MakeOutgoingSpec(DamageEffectClass, 1.f, Ctx);
+		if (!Spec.IsValid()) continue;
 
-        FGameplayEffectSpecHandle SpecHandle = SourceASC->MakeOutgoingSpec(
-            DamageEffectClass, 1.f, CtxHandle);
-        if (!SpecHandle.IsValid()) continue;
+		UAbilitySystemBlueprintLibrary::AssignTagSetByCallerMagnitude(Spec, DamageDataTag, DamageMagnitude);
+		TargetASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
 
-        UAbilitySystemBlueprintLibrary::AssignTagSetByCallerMagnitude(
-            SpecHandle, DamageDataTag, DamageMagnitude);
+		UE_LOG(LogTemp, Warning, TEXT("[Attack] hit %s for %.1f"), *HitActor->GetName(), DamageMagnitude);
 
-        TargetASC->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
-
-        DrawDebugSphere(GetWorld(), HitActor->GetActorLocation(),
-            60.f, 12, FColor::Red, false, 3.f, 0, 3.f);
-        DrawDebugLine(GetWorld(), AvatarActor->GetActorLocation(),
-            HitActor->GetActorLocation(), FColor::Red, false, 3.f, 0, 2.f);
-
-        UE_LOG(LogTemp, Warning, TEXT("[Attack] Damaged: %s | %.1f"),
-            *HitActor->GetName(), DamageMagnitude);
-        if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Red,
-            FString::Printf(TEXT("[Attack] Hit: %s | DMG: %.1f"),
-                *HitActor->GetName(), DamageMagnitude));
-    }
+		DrawDebugSphere(GetWorld(), HitActor->GetActorLocation(), 60.f, 12, FColor::Red, false, 3.f);
+		DrawDebugLine(GetWorld(), AvatarActor->GetActorLocation(), HitActor->GetActorLocation(), FColor::Red, false, 3.f);
+	}
 }
 
 void UARPGGameplayAbility_Attack::RestoreMovement()
 {
-    if (!CachedActorInfo) return;
+	if (!CachedActorInfo) return;
 
-    ACharacter* Character = Cast<ACharacter>(CachedActorInfo->AvatarActor.Get());
-    if (!Character) return;
+	ACharacter* Character = Cast<ACharacter>(CachedActorInfo->AvatarActor.Get());
+	if (!Character) return;
 
-    UCharacterMovementComponent* MoveComp = Character->GetCharacterMovement();
-    if (!MoveComp) return;
+	UCharacterMovementComponent* MoveComp = Character->GetCharacterMovement();
+	if (!MoveComp) return;
 
-    MoveComp->CurrentRootMotion.Clear();
-    MoveComp->StopActiveMovement();
-    MoveComp->SetMovementMode(EMovementMode::MOVE_Walking);
-
-    UE_LOG(LogTemp, Warning, TEXT("[Attack] Movement restored"));
-    if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Green,
-        TEXT("[Attack] Movement restored"));
+	MoveComp->CurrentRootMotion.Clear();
+	MoveComp->StopActiveMovement();
+	MoveComp->SetMovementMode(MOVE_Walking);
 }
 
 void UARPGGameplayAbility_Attack::EndAbility(
-    const FGameplayAbilitySpecHandle Handle,
-    const FGameplayAbilityActorInfo* ActorInfo,
-    const FGameplayAbilityActivationInfo ActivationInfo,
-    bool bReplicateEndAbility,
-    bool bWasCancelled)
+	const FGameplayAbilitySpecHandle Handle,
+	const FGameplayAbilityActorInfo* ActorInfo,
+	const FGameplayAbilityActivationInfo ActivationInfo,
+	bool bReplicateEndAbility,
+	bool bWasCancelled)
 {
-    GetWorld()->GetTimerManager().ClearTimer(DamageTimerHandle);
-    GetWorld()->GetTimerManager().ClearTimer(EndTimerHandle);
+	GetWorld()->GetTimerManager().ClearTimer(DamageTimerHandle);
+	GetWorld()->GetTimerManager().ClearTimer(EndTimerHandle);
 
-    RestoreMovement();
+	RestoreMovement();
 
-    UE_LOG(LogTemp, Warning, TEXT("[Attack] EndAbility | Cancelled: %s"),
-        bWasCancelled ? TEXT("true") : TEXT("false"));
-    if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.f,
-        bWasCancelled ? FColor::Red : FColor::White,
-        FString::Printf(TEXT("[Attack] EndAbility | Cancelled: %s"),
-            bWasCancelled ? TEXT("true") : TEXT("false")));
-
-    Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
+	Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 }

@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -14,42 +13,37 @@ public:
     UARPGGameplayAbility_Attack();
 
     virtual void ActivateAbility(
-        const FGameplayAbilitySpecHandle Handle,
-        const FGameplayAbilityActorInfo* ActorInfo,
-        const FGameplayAbilityActivationInfo ActivationInfo,
-        const FGameplayEventData* TriggerEventData) override;
+        const FGameplayAbilitySpecHandle Handle,const FGameplayAbilityActorInfo* ActorInfo,const FGameplayAbilityActivationInfo ActivationInfo,const FGameplayEventData* TriggerEventData) override;
 
     virtual void EndAbility(
-        const FGameplayAbilitySpecHandle Handle,
-        const FGameplayAbilityActorInfo* ActorInfo,
-        const FGameplayAbilityActivationInfo ActivationInfo,
-        bool bReplicateEndAbility,
-        bool bWasCancelled) override;
+        const FGameplayAbilitySpecHandle Handle,const FGameplayAbilityActorInfo* ActorInfo,const FGameplayAbilityActivationInfo ActivationInfo,bool bReplicateEndAbility,bool bWasCancelled) override;
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Combat")
+    // damage
+    UPROPERTY(EditDefaultsOnly, Category = "Attack")
     TSubclassOf<class UGameplayEffect> DamageEffectClass;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Combat")
-    float AttackRadius = 500.f;
+    UPROPERTY(EditDefaultsOnly, Category = "Attack")
+    FGameplayTag DamageDataTag;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Combat")
-    float DamageMagnitude = -25.f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Movement")
-    float LaunchSpeed = 1200.f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Movement")
-    float LaunchZForce = 400.f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Movement")
-    float DamageDelay = 0.35f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Combat")
+    UPROPERTY(EditDefaultsOnly, Category = "Attack")
     FGameplayTag GameplayCueTag;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Combat")
-    FGameplayTag DamageDataTag;
+    UPROPERTY(EditDefaultsOnly, Category = "Attack")
+    float DamageMagnitude = -25.f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Attack")
+    float AttackRadius = 500.f;
+
+    // movement
+    UPROPERTY(EditDefaultsOnly, Category = "Attack")
+    float LaunchSpeed = 1200.f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Attack")
+    float LaunchZForce = 400.f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Attack")
+    float DamageDelay = 0.35f;
 
 private:
     void PerformAttackOverlap();
@@ -57,6 +51,7 @@ private:
 
     UPROPERTY()
     AActor* TargetActor = nullptr;
+    FVector TargetLoc_Cursor = FVector::ZeroVector;
 
     TArray<AActor*> ActorsToIgnore;
 
@@ -66,5 +61,4 @@ private:
 
     FTimerHandle DamageTimerHandle;
     FTimerHandle EndTimerHandle;
-    FVector TargetLoc_Cursor = FVector::ZeroVector;
 };
