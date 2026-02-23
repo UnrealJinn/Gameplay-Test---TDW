@@ -1,5 +1,4 @@
 #include "PlayerAttributeSet.h"
-#include "Net/UnrealNetwork.h"
 
 UPlayerAttributeSet::UPlayerAttributeSet()
 {

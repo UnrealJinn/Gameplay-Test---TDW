@@ -37,7 +37,7 @@ protected:
 
     // movement
     UPROPERTY(EditDefaultsOnly, Category = "Attack")
-    float LaunchSpeed = 1200.f;
+    float LaunchSpeed = 1000.f;
 
     UPROPERTY(EditDefaultsOnly, Category = "Attack")
     float LaunchZForce = 400.f;
